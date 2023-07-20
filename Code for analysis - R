@@ -1,0 +1,379 @@
+# Installe les bibliothèques dplyr, readxl, et stats
+#install.packages(c("dplyr", "readxl", "stats", "irr", "caret"))
+# install.packages("installr")
+# installr::install.Rtools() 
+# install.packages('caret')
+# install.packages("vctrs")
+# install.packages("gplots")
+
+install.packages("cvms")
+
+# Load the libraries
+library(vctrs)
+library(readxl)
+library(stats)
+library(dplyr)
+library(irr)
+library(caret)
+library(ggplot2)
+library(reshape2)
+library(gplots)
+
+# # Import the Excel file
+master <- read_excel("DF2.xlsx", sheet = "Sheet1")
+
+# Create two new data frames
+adequate <- data.frame()
+artifact <- data.frame()
+
+# Copy rows with a value of 0 in "Artefacts_H" to "adequate"
+adequate <- master[master$artef == 0,]
+
+# Copy rows with a value of 1 in "Artefacts_H" to "artifact"
+artifact <- master[master$artef == 1,]
+
+# Calculate the frequency of each outcome in each group
+group0_freq <- table(master[master$artef == 0, "dg"])
+group1_freq <- table(master[master$artef == 1, "dg"])
+
+# Perform a chi-squared test for each outcome
+results <- data.frame(outcome = names(group0_freq),
+                      group0_count = group0_freq,
+                      group1_count = group1_freq[names(group0_freq)],
+                      p_value = numeric(length(group0_freq)))
+for (i in 1:length(group0_freq)) {
+  outcome_freq <- c(group0_freq[i], group1_freq[i])
+  result <- chisq.test(outcome_freq)
+  results[i, "p_value"] <- format(result$p.value, scientific = FALSE)
+}
+
+# Compute the median and IQR of the column egfr, trop, bnp and cascore:
+
+# 1. for all rows
+median_all <- sapply(df[, c("egfr", "trop", "bnp", "cascore")], median, na.rm = TRUE)
+median_all
+
+quartiles_all <- data.frame(
+  egfr = quantile(df$egfr, probs=c(0.25, 0.75), na.rm=TRUE),
+  trop = quantile(df$trop, probs=c(0.25, 0.75), na.rm=TRUE),
+  bnp = quantile(df$bnp, probs=c(0.25, 0.75), na.rm=TRUE),
+  cascore = quantile(df$cascore, probs=c(0.25, 0.75), na.rm=TRUE)
+)
+quartiles_all
+
+# 2. for rows where artef = 0 
+median_artef_0 <- sapply(df[df$artef == 0, c("egfr", "trop", "bnp", "cascore")], median, na.rm = TRUE)
+median_artef_0
+
+quartiles_0 <- data.frame(
+  egfr = quantile(df[df$artef == 0, "egfr"], probs=c(0.25, 0.75), na.rm=TRUE),
+  trop = quantile(df[df$artef == 0, "trop"], probs=c(0.25, 0.75), na.rm=TRUE),
+  bnp = quantile(df[df$artef == 0, "bnp"], probs=c(0.25, 0.75), na.rm=TRUE),
+  cascore = quantile(df[df$artef == 0, "cascore"], probs=c(0.25, 0.75), na.rm=TRUE)
+)
+quartiles_0
+
+# 3. for rows where artef = 1
+median_artef_1 <- sapply(df[df$artef == 1, c("egfr", "trop", "bnp", "cascore")], median, na.rm = TRUE)
+median_artef_1
+
+quartiles_1 <- data.frame(
+  egfr = quantile(df[df$artef == 1, "egfr"], probs=c(0.25, 0.75), na.rm=TRUE),
+  trop = quantile(df[df$artef == 1, "trop"], probs=c(0.25, 0.75), na.rm=TRUE),
+  bnp = quantile(df[df$artef == 1, "bnp"], probs=c(0.25, 0.75), na.rm=TRUE),
+  cascore = quantile(df[df$artef == 1, "cascore"], probs=c(0.25, 0.75), na.rm=TRUE)
+)
+
+quartiles_1
+
+master$bmi <- as.numeric(master$bmi)
+master$trop <- as.numeric(master$trop)
+master$bnp <- as.numeric(master$bnp)
+
+# Copy rows with a value of 0 in "Artefacts_H" to "adequate"
+adequate <- master[master$artef == 0,]
+
+# Copy rows with a value of 1 in "Artefacts_H" to "artifact"
+artifact <- master[master$artef == 1,]
+
+# Calculate statistics for whole pop
+whole_pop <- data.frame(age = c(mean(master$age, na.rm = TRUE), sd(master$age, na.rm = TRUE)),
+                        bmi = c(mean(as.numeric(master$bmi), na.rm = TRUE), sd(as.numeric(master$bmi), na.rm = TRUE)),
+                        fcbpm = c(mean(master$fcbpm, na.rm = TRUE), sd(master$fcbpm, na.rm = TRUE)),
+                        trop = c(mean(as.numeric(master$trop), na.rm = TRUE), sd(as.numeric(master$trop), na.rm = TRUE)),
+                        bnp = c(mean(as.numeric(master$bnp), na.rm = TRUE), sd(as.numeric(master$bnp), na.rm = TRUE)),
+                        cascore = c(mean(master$cascore, na.rm = TRUE), sd(master$cascore, na.rm = TRUE)),
+                        egfr = c(mean(master$egfr, na.rm = TRUE), sd(master$egfr, na.rm = TRUE)))
+colnames(whole_pop) <- c("age", "bmi", "fcbpm", "trop", "bnp", "cascore", "egfr")
+
+# Calculate statistics for rows with artef = 0
+artef_0 <- data.frame(age = c(mean(adequate$age, na.rm = TRUE), sd(adequate$age, na.rm = TRUE)),
+                        bmi = c(mean(as.numeric(adequate$bmi), na.rm = TRUE), sd(as.numeric(adequate$bmi), na.rm = TRUE)),
+                        fcbpm = c(mean(adequate$fcbpm, na.rm = TRUE), sd(adequate$fcbpm, na.rm = TRUE)),
+                        trop = c(mean(as.numeric(adequate$trop), na.rm = TRUE), sd(as.numeric(adequate$trop), na.rm = TRUE)),
+                        bnp = c(mean(as.numeric(adequate$bnp), na.rm = TRUE), sd(as.numeric(adequate$bnp), na.rm = TRUE)),
+                        cascore = c(mean(adequate$cascore, na.rm = TRUE), sd(adequate$cascore, na.rm = TRUE)),
+                        egfr = c(mean(adequate$egfr, na.rm = TRUE), sd(adequate$egfr, na.rm = TRUE)))
+colnames(artef_0) <- c("age", "bmi", "fcbpm", "trop", "bnp", "cascore", "egfr")
+
+# Calculate statistics for rows with artef = 1
+artef_1 <- data.frame(age = c(mean(artifact$age, na.rm = TRUE), sd(artifact$age, na.rm = TRUE)),
+                      bmi = c(mean(as.numeric(artifact$bmi), na.rm = TRUE), sd(as.numeric(artifact$bmi), na.rm = TRUE)),
+                      fcbpm = c(mean(artifact$fcbpm, na.rm = TRUE), sd(artifact$fcbpm, na.rm = TRUE)),
+                      trop = c(mean(as.numeric(artifact$trop), na.rm = TRUE), sd(as.numeric(artifact$trop), na.rm = TRUE)),
+                      bnp = c(mean(as.numeric(artifact$bnp), na.rm = TRUE), sd(as.numeric(artifact$bnp), na.rm = TRUE)),
+                      cascore = c(mean(artifact$cascore, na.rm = TRUE), sd(artifact$cascore, na.rm = TRUE)),
+                      egfr = c(mean(artifact$egfr, na.rm = TRUE), sd(artifact$egfr, na.rm = TRUE)))
+colnames(artef_1) <- c("age", "bmi", "fcbpm", "trop", "bnp", "cascore", "egfr")
+
+# Perform the Mann-Whitney U test
+age <- wilcox.test(artifact$age, adequate$age, alternative = "two.sided", paired = FALSE, na.rm = TRUE)
+bmi <- wilcox.test(artifact$bmi, adequate$bmi, alternative = "two.sided", paired = FALSE, na.rm = TRUE)
+fcbpm <- wilcox.test(artifact$fcbpm, adequate$fcbpm, alternative = "two.sided", paired = FALSE, na.rm = TRUE)
+trop <- wilcox.test(artifact$trop, adequate$trop, alternative = "two.sided", paired = FALSE, na.rm = TRUE)
+egfr <- wilcox.test(artifact$egfr, adequate$egfr, alternative = "two.sided", paired = FALSE, na.rm = TRUE)
+cascore <- wilcox.test(artifact$cascore, adequate$cascore, alternative = "two.sided", paired = FALSE, na.rm = TRUE)
+
+# Print the test statistic and p-value
+print(paste("Age test statistic:", age$statistic))
+print(paste("p-value:", age$p.value))
+print(paste("BMI test statistic:", bmi$statistic))
+print(paste("p-value:", bmi$p.value))
+print(paste("FC test statistic:", fcbpm$statistic))
+print(paste("p-value:", fcbpm$p.value))
+print(paste("Trop test statistic:", trop$statistic))
+print(paste("p-value:", trop$p.value))
+print(paste("BNP test statistic:", bnp$statistic))
+print(paste("p-value:", bnp$p.value))
+print(paste("GFR test statistic:", egfr$statistic))
+print(paste("p-value:", egfr$p.value))
+print(paste("CaScore test statistic:", cascore$statistic))
+print(paste("p-value:", cascore$p.value))
+
+# Count the number of females in the whole population
+master_females <- sum(master$sex == "F")
+print(paste(master_females, master_females/217))
+
+# Count the number of females in the adequate dataset
+adequate_females <- sum(adequate$sex == "F")
+print(paste(adequate_females, adequate_females/121))
+
+# Count the number of females in the artifact dataset
+artifact_females <- sum(artifact$sex == "F")
+print(paste(artifact_females, artifact_females/96))
+
+# Count the number of individuals with diabetes in the whole population
+master_diab <- sum(master$diab == 1)
+print(paste(master_diab, master_diab/217))
+
+# Count the number of individuals with diabetes in the adequate dataset
+adequate_diab <- sum(adequate$diab == 1)
+print(paste(adequate_diab, adequate_diab/121))
+
+# Count the number of individuals with diabetes in the artifact dataset
+artifact_diab <- sum(artifact$diab == 1)
+print(paste(artifact_diab, artifact_diab/96))
+
+# Count the number of individuals with hypertension in the whole population
+master_hta <- sum(master$hta == 1)
+print(paste(master_hta, master_hta/217))
+
+# Count the number of individuals with hypertension in the adequate dataset
+adequate_hta <- sum(adequate$hta == 1)
+print(paste(adequate_hta, adequate_hta/121))
+
+# Count the number of individuals with hypertension in the artifact dataset
+artifact_hta <- sum(artifact$hta == 1)
+print(paste(artifact_hta, artifact_hta/96))
+
+# Count the number of individuals with dyslipidemia in the whole population
+master_lip <- sum(master$dyslipid == 1)
+print(paste(master_lip, master_lip/217))
+
+# Count the number of individuals with dyslipidemia in the adequate dataset
+adequate_lip <- sum(adequate$dyslipid == 1)
+print(paste(adequate_lip, adequate_lip/121))
+
+# Count the number of individuals with dyslipidemia in the artifact dataset
+artifact_lip <- sum(artifact$dyslipid == 1)
+print(paste(artifact_lip, artifact_lip/96))
+
+# Create an empty data frame to store the results
+demographics_table <- data.frame()
+
+# Add a row for the whole population
+demographics_table[1, "Population"] <- "Whole population"
+demographics_table[1, "Female"] <- sum(master$sex == "F")
+demographics_table[1, "Diabetes"] <- sum(master$diab == 1)
+demographics_table[1, "Hypertension"] <- sum(master$hta == 1)
+demographics_table[1, "Dyslipidemia"] <- sum(master$dyslipid == 1)
+
+# Add a row for the rows with artef = 0
+demographics_table[2, "Population"] <- "Artefact = 0"
+demographics_table[2, "Female"] <- sum(adequate$sex == "F")
+demographics_table[2, "Diabetes"] <- sum(adequate$diab == 1)
+demographics_table[2, "Hypertension"] <- sum(adequate$hta == 1)
+demographics_table[2, "Dyslipidemia"] <- sum(adequate$dyslipid == 1)
+
+# Add a row for the rows with artef = 1
+demographics_table[3, "Population"] <- "Artefact = 1"
+demographics_table[3, "Female"] <- sum(artifact$sex == "F")
+demographics_table[3, "Diabetes"] <- sum(artifact$diab == 1)
+demographics_table[3, "Hypertension"] <- sum(artifact$hta == 1)
+demographics_table[3, "Dyslipidemia"] <- sum(artifact$dyslipid == 1)
+
+# View the resulting table
+demographics_table
+
+# Create a data frame to hold the results
+results_df <- data.frame(population = c("Whole Population", "Adequate", "Artifact"),
+                         female = c(nrow(subset(master, sex == "F")), 
+                                    nrow(subset(adequate, sex == "F")), 
+                                    nrow(subset(artifact, sex == "F"))),
+                         diab = c(nrow(subset(master, diab == 1)),
+                                  nrow(subset(adequate, diab == 1)), 
+                                  nrow(subset(artifact, diab == 1))),
+                         hta = c(nrow(subset(master, hta == 1)),
+                                 nrow(subset(adequate, hta == 1)), 
+                                 nrow(subset(artifact, hta == 1))),
+                         dyslip = c(nrow(subset(master, dyslipid == 1)),
+                                    nrow(subset(adequate, dyslipid == 1)), 
+                                    nrow(subset(artifact, dyslipid == 1))))
+
+# Add the percentage column
+results_df$percent_female <- 100 * results_df$female / c(217, 121, 96)
+results_df$percent_diab <- 100 * results_df$diab / c(217, 121, 96)
+results_df$percent_hta <- 100 * results_df$hta / c(217, 121, 96)
+results_df$percent_dyslip <- 100 * results_df$dyslip / c(217, 121, 96)
+
+# View the results
+print(results_df)
+
+#### Discharge diagnosis:  the results
+dg_counts_whole_pop <- table(master$dg)
+dg_percentages_whole_pop <- dg_counts_whole_pop / nrow(master)
+
+dg_counts_adequate <- table(adequate$dg)
+dg_percentages_adequate <- dg_counts_adequate / nrow(adequate)
+
+dg_counts_artifact <- table(artifact$dg)
+dg_percentages_artifact <- dg_counts_artifact / nrow(artifact)
+
+dg_table <- cbind(dg_counts_whole_pop, dg_percentages_whole_pop, dg_counts_adequate, dg_percentages_adequate, dg_counts_artifact, dg_percentages_artifact)
+
+colnames(dg_table) <- c("Count (Whole Pop)", "Percentage (Whole Pop)", 
+                        "Count (Adequate)", "Percentage (Adequate)", 
+                        "Count (Artifact)", "Percentage (Artifact)")
+
+adequate_diag_distribution <- as.data.frame(table(adequate$dg))
+artifact_diag_distribution <- as.data.frame(table(artifact$dg))
+
+#### CHI SQUARE TEST DATA
+## prepare the dataframes with the individual results
+adequate_sex_distribution <- table(adequate$sex)
+adequate_hta_distribution <- table(adequate$hta)
+adequate_diab_distribution <- table(adequate$diab)
+adequate_dyslipid_distribution <- table(adequate$dyslipid)
+
+artifact_sex_distribution <- table(artifact$sex)
+artifact_hta_distribution <- table(artifact$hta)
+artifact_diab_distribution <- table(artifact$diab)
+artifact_dyslipid_distribution <- table(artifact$dyslipid)
+
+adequate_sex_distribution_df <- as.data.frame(adequate_sex_distribution)
+artifact_sex_distribution_df <- as.data.frame(artifact_sex_distribution)
+adequate_hta_distribution_df <- as.data.frame(adequate_hta_distribution)
+adequate_diab_distribution_df <- as.data.frame(adequate_diab_distribution)
+adequate_dyslipid_distribution_df <- as.data.frame(adequate_dyslipid_distribution)
+artifact_hta_distribution_df <- as.data.frame(artifact_hta_distribution)
+artifact_diab_distribution_df <- as.data.frame(artifact_diab_distribution)
+artifact_dyslipid_distribution_df <- as.data.frame(artifact_dyslipid_distribution)
+
+## compute the chisquare
+
+#SEX
+chisq.test(rbind(c(52, 69), c(37, 59)))
+
+#HTA
+chisq.test(rbind(c(88, 33), c(66, 33)))
+
+#DIAB
+chisq.test(rbind(c(22, 99), c(17, 79)))
+
+#DYSLIPID
+chisq.test(rbind(c(33, 88), c(31, 65)))
+
+#AAS
+chisq.test(rbind(c(21, 100), c(12, 84)))
+
+#infarct
+chisq.test(rbind(c(9, 112), c(8, 88)))
+
+#heart
+chisq.test(rbind(c(11, 110), c(9, 87)))
+
+#pain
+chisq.test(rbind(c(10, 111), c(7, 89)))
+
+#hta
+chisq.test(rbind(c(10, 111), c(2, 94)))
+
+#gastro
+chisq.test(rbind(c(15, 106), c(19, 77)))
+
+#idio
+chisq.test(rbind(c(30, 91), c(30, 66)))
+
+#peri
+chisq.test(rbind(c(5, 116), c(2, 94)))
+
+
+mean_dens_0 <- mean(master[master$artef == 0, "dens"])
+std_dens_0 <- sd(master[master$artef == 0, "dens"])
+mean_dens_1 <- mean(master[master$artef == 1, "dens"])
+std_dens_1 <- sd(master[master$artef == 1, "dens"])
+
+
+# Distribution of dg values in the whole population
+dg_counts_whole_pop <- table(master$dg)
+dg_percentages_whole_pop <- dg_counts_whole_pop / nrow(master)
+
+# Distribution of dg values in the adequate population
+dg_counts_adequate <- table(adequate$dg)
+dg_percentages_adequate <- dg_counts_adequate / nrow(adequate)
+
+# Distribution of dg values in the artifact population
+dg_counts_artifact <- table(artifact$dg)
+dg_percentages_artifact <- dg_counts_artifact / nrow(artifact)
+
+# Combine the tables
+dg_table <- cbind(dg_counts_whole_pop, dg_percentages_whole_pop, 
+                  dg_counts_adequate, dg_percentages_adequate, 
+                  dg_counts_artifact, dg_percentages_artifact)
+
+# Give the columns descriptive names
+colnames(dg_table) <- c("Count (Whole Pop)", "Percentage (Whole Pop)", 
+                        "Count (Adequate)", "Percentage (Adequate)", 
+                        "Count (Artifact)", "Percentage (Artifact)")
+
+# Perform chi-square test
+chisq.test(dg_table)
+
+#SEX
+dg_counts_whole_pop <- table(master$dg)
+dg_counts_adequate <- table(adequate$dg)
+dg_counts_artifact <- table(artifact$dg)
+
+dg_table <- cbind(dg_counts_whole_pop, dg_counts_adequate, dg_counts_artifact)
+dg_table[is.na(dg_table)] <- 0
+colnames(dg_table) <- c("Count (Whole Pop)", "Count (Adequate)", "Count (Artifact)")
+
+p_values <- numeric(length(dg_counts_whole_pop))
+for (i in 1:length(dg_counts_whole_pop)) {
+  outcome_freq <- c(dg_counts_adequate[i], dg_counts_artifact[i])
+  result <- chisq.test(outcome_freq)
+  p_values[i] <- result$p.value
+}
+
+dg_table <- cbind(dg_table, p_values)
+colnames(dg_table)[ncol(dg_table)] <- "p-value"
