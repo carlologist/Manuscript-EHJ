@@ -1,0 +1,650 @@
+###################################################### IMPORT LIBRARIES
+import pandas as pd
+import numpy as np
+from sklearn.metrics import confusion_matrix
+from sklearn.metrics import plot_confusion_matrix
+from sklearn.metrics import cohen_kappa_score
+from sklearn.utils.multiclass import unique_labels
+import matplotlib.pyplot as plt
+import seaborn as sns
+from scipy.stats import mannwhitneyu
+import os
+import nbconvert
+from sklearn.preprocessing import LabelEncoder
+from IPython.display import display, HTML
+
+##################################################### PREPARE THE DATA
+path = os.path.join(os.getcwd(), 'DF.xlsx')
+df = pd.read_excel(path)
+
+# CREATE THE SUB DF FOR STENOSIS a Dataframe with bound values of grades 1-2 and replaced values 3 by 2
+df_sten = df.assign(grade_h = df["grade_h"].replace({1:1, 2:1, 3:2}), grade_ai = df["grade_ai"].replace({1:1, 2:1, 3:2}))
+
+# CREATE THE grade_h_encoded COLUMN
+df['grade_h_encoded'] = df['grade_h']
+df.loc[df['grade_h'] == 'N', 'grade_h_encoded'] = 4
+
+df_sten['grade_h_encoded'] = df_sten['grade_h']
+df_sten.loc[df_sten['grade_h'] == 'N', 'grade_h_encoded'] = 4
+
+# NO ARTEFACTS Create a DataFrame with rows where "artef" is 0
+df_0 = df.loc[df["artef"] == 0]
+df_sten_0 = df_sten.loc[df_sten["artef"] == 0]
+
+# ARTEFACTS Create a DataFrame with rows where "artef" is 1
+df_1 = df.loc[df["artef"] == 1]
+df_sten_1 = df_sten.loc[df_sten["artef"] == 1]
+
+# Prepare the column names lists for iteration
+y_true_columns = ["ladh", "rcah", "cxh"]
+y_pred_columns = ["ladai", "rcaai", "cxai"]
+
+#Create a DataFrame with rows where diagnosis is infarct
+df_inf = df.loc[df["dg"] == "infarct"]
+df_sten_inf = df_sten.loc[df_sten["dg"] == "infarct"]
+df_sten_inf_HQ = df.loc[(df["dg"] == "infarct") & (df["artef"] == 0)]
+df_sten_inf_LQ = df.loc[(df["dg"] == "infarct") & (df["artef"] == 1)]
+
+#################################################### INTERREADER AGREEMENT READING
+path = os.path.join(os.getcwd(), 'reading2.xlsx')
+reading2 = pd.read_excel(path)
+
+# Create new columns based on the conditions for reader 1
+reading2['lad_sten_1'] = reading2['lad_1'].apply(lambda x: 3 if x == 3 else (1 if x in [1, 2] else 0))
+reading2['cx_sten_1'] = reading2['cx_1'].apply(lambda x: 3 if x == 3 else (1 if x in [1, 2] else 0))
+reading2['rca_sten_1'] = reading2['rca_1'].apply(lambda x: 3 if x == 3 else (1 if x in [1, 2] else 0))
+
+# Create new columns based on the conditions for reader 2
+reading2['lad_sten_2'] = reading2['lad_2'].apply(lambda x: 3 if x == 3 else (1 if x in [1, 2] else 0))
+reading2['cx_sten_2'] = reading2['cx_2'].apply(lambda x: 3 if x == 3 else (1 if x in [1, 2] else 0))
+reading2['rca_sten_2'] = reading2['rca_2'].apply(lambda x: 3 if x == 3 else (1 if x in [1, 2] else 0))
+
+# Concatenate the values from the two readers for lad, cx, and rca columns
+reader1_stacked = reading2['lad_1'].tolist() + reading2['cx_1'].tolist() + reading2['rca_1'].tolist()
+reader2_stacked = reading2['lad_2'].tolist() + reading2['cx_2'].tolist() + reading2['rca_2'].tolist()
+
+# Concatenate the values from the two readers for lad_sten, cx_sten, and rca_sten columns
+reader1_sten_stacked = reading2['lad_sten_1'].tolist() + reading2['cx_sten_1'].tolist() + reading2['rca_sten_1'].tolist()
+reader2_sten_stacked = reading2['lad_sten_2'].tolist() + reading2['cx_sten_2'].tolist() + reading2['rca_sten_2'].tolist()
+
+# Compute Cohen's Kappa for lad, cx, and rca columns
+kappa_stacked = cohen_kappa_score(reader1_stacked, reader2_stacked)
+
+# Compute Cohen's Kappa for total columns
+kappa_total = cohen_kappa_score(reading2['total_1'], reading2['total_2'])
+
+# Compute Cohen's Kappa for stenosis columns
+kappa_sten = cohen_kappa_score(reading2['sten_1'], reading2['sten_2'])
+
+# Calculate the Cohen's Kappa score for the concatenated lists
+kappa_sten_vess = cohen_kappa_score(reader1_sten_stacked, reader2_sten_stacked)
+
+print(f"Cohen's Kappa for vessel class: {kappa_stacked:.2f}")
+print("Cohen's Kappa for vessel stenosis:", kappa_sten_vess)
+print(f"Cohen's Kappa for patient class: {kappa_total:.2f}")
+print(f"Cohen's Kappa for patient stenosis: {kappa_sten:.2f}")
+
+#################################################### CREATE THE FUNCTIONS : 
+
+######################################### CONFUSION MATRIX FOR PATIENT ANALYSIS
+def pat_confusion_matrix(df):
+    
+    y_true = df["grade_h_encoded"].astype(np.int64)
+    y_pred = df["grade_ai"]
+    confusion_mat = confusion_matrix(y_true, y_pred)
+    
+    confusion_mat_df = pd.DataFrame(confusion_mat, 
+                                    columns=["model: " + str(i) for i in range(confusion_mat.shape[1])],
+                                    index=["human grading: " + str(i) for i in range(confusion_mat.shape[0])])
+
+    confusion_mat_df.loc["Total"] = confusion_mat_df.sum()
+    confusion_mat_df["Total"] = confusion_mat_df.sum(axis=1)
+    
+    html_table = confusion_mat_df.to_html()
+    display(HTML(html_table))
+    
+
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(confusion_mat, annot=True, fmt='d', cmap="Greens", 
+                     annot_kws={"size": 25},
+                     xticklabels=["DLM : class " + str(i) for i in range(1, confusion_mat.shape[1]+1)], 
+                     yticklabels=["Human reader : class " + str(i) for i in range(1, confusion_mat.shape[0]+1)])
+
+    plt.yticks(rotation=0, fontsize=20)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_label_position('top')
+    ax.xaxis.set_ticklabels(ax.xaxis.get_ticklabels(), fontsize=20)
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=15)
+  
+    plt.savefig("confusion_matrix.png", dpi=300)
+    
+    
+############################################### CONFUSION MATRIX FOR VESSEL ANALYSIS
+def ves_confusion_matrix(df):
+    
+    y_true = df.loc[:, y_true_columns[0]].astype(str)
+    y_pred = df.loc[:, y_pred_columns[0]].astype(str)
+    
+    confusion_mat = confusion_matrix(y_true, y_pred)
+
+    for i in range(1, len(y_true_columns)):
+        y_true = df.loc[:, y_true_columns[i]].astype(str)
+        y_pred = df.loc[:, y_pred_columns[i]].astype(str)
+        confusion_mat += confusion_matrix(y_true, y_pred)
+
+    confusion_mat_df = pd.DataFrame(confusion_mat, 
+                                columns=["Model: " + str(i+1) for i in range(confusion_mat.shape[1])],
+                                index=["Human grading: " + str(i+1) for i in range(confusion_mat.shape[0])])
+
+    confusion_mat_df.loc["Total"] = confusion_mat_df.sum()
+    confusion_mat_df["Total"] = confusion_mat_df.sum(axis=1)
+    
+    html_table = confusion_mat_df.to_html()
+    display(HTML(html_table))
+
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(confusion_mat, annot=True, fmt='d', cmap='Greens', 
+                     annot_kws={"size": 25},
+                     xticklabels=["DLM : class " + str(i) for i in range(1, confusion_mat.shape[1]+1)], 
+                     yticklabels=["Human reader : class " + str(i) for i in range(1, confusion_mat.shape[0]+1)])
+
+    plt.yticks(rotation=0, fontsize=20)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_label_position('top')
+    ax.xaxis.set_ticklabels(ax.xaxis.get_ticklabels(), fontsize=20)
+
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=15)
+
+    plt.savefig("confusion_matrix.png", dpi=300)
+    
+    
+############################################# CONFUSION MATRIX FOR STENOSIS
+def sten_confusion_matrix(df):
+    
+    y_true = df["grade_h"].astype(np.int64)
+    y_pred = df["grade_ai"]
+    confusion_mat = confusion_matrix(y_true, y_pred)
+
+    confusion_mat_df = pd.DataFrame(confusion_mat, 
+                                    columns=["model: " + str(i) for i in range(confusion_mat.shape[1])],
+                                    index=["human grading: " + str(i) for i in range(confusion_mat.shape[0])])
+
+    confusion_mat_df.loc["Total"] = confusion_mat_df.sum()
+    confusion_mat_df["Total"] = confusion_mat_df.sum(axis=1)
+    
+    html_table = confusion_mat_df.to_html()
+    display(HTML(html_table))
+
+    TP = confusion_mat[1][1]
+    FP = confusion_mat[0][1]
+    FN = confusion_mat[1][0]
+    TN = confusion_mat[0][0]
+    sensitivity = TP / (TP + FN)
+    specificity = TN / (TN + FP)
+    accuracy = (TP + TN) / (TP + TN + FP + FN)
+    PPV = TP / (TP + FP)
+    NPV = TN / (TN + FN)
+
+    print("Sensitivity:", sensitivity)
+    print("Specificity:", specificity)
+    print("Accuracy:", accuracy)
+    print("Positive Predictive Value (PPV):", PPV)
+    print("Negative Predictive Value (NPV):", NPV)
+
+    
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(confusion_mat, annot=True, fmt='d', cmap='Greens',
+                    annot_kws={"size": 25},
+                    xticklabels=["DLM : stenosis < 50%", "DLM : stenosis ≥ 50%"],
+                    yticklabels=["Human reader: stenosis < 50%", "Human reader: stenosis ≥ 50%"])
+
+    plt.yticks(rotation=0, fontsize=20)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_label_position('top')
+    ax.xaxis.set_ticklabels(ax.xaxis.get_ticklabels(), fontsize=20)
+
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=15)
+
+    plt.savefig("confusion_matrix.png", dpi=300)
+    
+    return sensitivity, specificity, PPV, NPV, accuracy
+
+
+############################################### CONFUSION MATRIX FOR VESSEL STENOSIS ANALYSIS
+def stenves_confusion_matrix(df):
+    
+    y_true = df.loc[:, y_true_columns[0]].replace({1:1, 2:1, 3:2}).astype(str)
+    y_pred = df.loc[:, y_pred_columns[0]].replace({1:1, 2:1, 3:2}).astype(str)
+    
+    confusion_mat = confusion_matrix(y_true, y_pred)
+
+    for i in range(1, len(y_true_columns)):
+        y_true = df.loc[:, y_true_columns[i]].replace({1:1, 2:1, 3:2}).astype(str)
+        y_pred = df.loc[:, y_pred_columns[i]].replace({1:1, 2:1, 3:2}).astype(str)
+        confusion_mat += confusion_matrix(y_true, y_pred)
+
+    confusion_mat_df = pd.DataFrame(confusion_mat, 
+                                columns=["Model: " + str(i+1) for i in range(confusion_mat.shape[1])],
+                                index=["Human grading: " + str(i+1) for i in range(confusion_mat.shape[0])])
+
+    confusion_mat_df.loc["Total"] = confusion_mat_df.sum()
+    confusion_mat_df["Total"] = confusion_mat_df.sum(axis=1)
+    
+   
+    
+    html_table = confusion_mat_df.to_html()
+    display(HTML(html_table))
+    
+    TP = confusion_mat[1][1]
+    FP = confusion_mat[0][1]
+    FN = confusion_mat[1][0]
+    TN = confusion_mat[0][0]
+    sensitivity = TP / (TP + FN)
+    specificity = TN / (TN + FP)
+    accuracy = (TP + TN) / (TP + TN + FP + FN)
+    PPV = TP / (TP + FP)
+    NPV = TN / (TN + FN)
+
+    print("Sensitivity:", sensitivity)
+    print("Specificity:", specificity)
+    print("Accuracy:", accuracy)
+    print("Positive Predictive Value (PPV):", PPV)
+    print("Negative Predictive Value (NPV):", NPV)
+
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(confusion_mat, annot=True, fmt='d', cmap='Greens',
+                    annot_kws={"size": 25},
+                    xticklabels=["DLM : stenosis < 50%", "DLM : stenosis ≥ 50%"],
+                    yticklabels=["Human reader: stenosis < 50%", "Human reader: stenosis ≥ 50%"])
+
+    plt.yticks(rotation=0, fontsize=20)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_label_position('top')
+    ax.xaxis.set_ticklabels(ax.xaxis.get_ticklabels(), fontsize=20)
+
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=15)
+
+    plt.savefig("confusion_matrix.png", dpi=300)
+    
+    # Return confusion matrix
+    return sensitivity, specificity, PPV, NPV, accuracy
+    
+############################################### CONFUSION MATRIX FOR VESSEL STENOSIS ANALYSIS
+def stenves_confusion_matrix2(df):
+    
+    y_true = df.loc[:, y_true_columns[0]].replace({1:1, 2:1, 3:2}).astype(str)
+    y_pred = df.loc[:, y_pred_columns[0]].replace({1:1, 2:1, 3:2}).astype(str)
+    
+    confusion_mat = confusion_matrix(y_true, y_pred)
+
+    for i in range(1, len(y_true_columns)):
+        y_true = df.loc[:, y_true_columns[i]].replace({1:1, 2:1, 3:2}).astype(str)
+        y_pred = df.loc[:, y_pred_columns[i]].replace({1:1, 2:1, 3:2}).astype(str)
+        confusion_mat += confusion_matrix(y_true, y_pred)
+
+    confusion_mat = confusion_mat[:-1, :-1]
+    confusion_mat_df = pd.DataFrame(confusion_mat, 
+                                columns=["Model: " + str(i+1) for i in range(confusion_mat.shape[1])],
+                                index=["Human grading: " + str(i+1) for i in range(confusion_mat.shape[0])])
+
+    confusion_mat_df.loc["Total"] = confusion_mat_df.sum()
+    confusion_mat_df["Total"] = confusion_mat_df.sum(axis=1)
+    
+    html_table = confusion_mat_df.to_html()
+    display(HTML(html_table))
+    
+    TP = confusion_mat[1][1]
+    FP = confusion_mat[0][1]
+    FN = confusion_mat[1][0]
+    TN = confusion_mat[0][0]
+    sensitivity = TP / (TP + FN)
+    specificity = TN / (TN + FP)
+    accuracy = (TP + TN) / (TP + TN + FP + FN)
+    PPV = TP / (TP + FP)
+    NPV = TN / (TN + FN)
+
+    print("Sensitivity:", sensitivity)
+    print("Specificity:", specificity)
+    print("Accuracy:", accuracy)
+    print("Positive Predictive Value (PPV):", PPV)
+    print("Negative Predictive Value (NPV):", NPV)
+
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(confusion_mat, annot=True, fmt='d', cmap='Greens',
+                    annot_kws={"size": 25},
+                    xticklabels=["DLM : stenosis < 50%", "DLM : stenosis ≥ 50%"],
+                    yticklabels=["Human reader: stenosis < 50%", "Human reader: stenosis ≥ 50%"])
+
+    plt.yticks(rotation=0, fontsize=20)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_label_position('top')
+    ax.xaxis.set_ticklabels(ax.xaxis.get_ticklabels(), fontsize=20)
+
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=15)
+
+    plt.savefig("confusion_matrix.png", dpi=300)    
+    
+
+############################################### CONFUSION MATRIX FOR VESSEL CLASS ANALYSIS WITH NO N
+def noN_ves_confusion_matrix(df):
+    
+    confusion_mat = np.zeros((3,3))
+
+    for i in range(len(y_true_columns)):
+        y_true = df.loc[df[y_true_columns[i]]!="N", y_true_columns[i]].astype(str)
+        y_pred = df.loc[df[y_true_columns[i]]!="N", y_pred_columns[i]].astype(str)
+        confusion_mat += confusion_matrix(y_true, y_pred)
+
+    confusion_mat_df = pd.DataFrame(confusion_mat,
+                                columns=["Model: " + str(i+1) for i in range(confusion_mat.shape[1])],
+                                index=["Human grading: " + str(i+1) for i in range(confusion_mat.shape[0])])
+
+    confusion_mat_df.loc["Total"] = confusion_mat_df.sum()
+    confusion_mat_df["Total"] = confusion_mat_df.sum(axis=1)
+
+    html_table = confusion_mat_df.to_html()
+    display(HTML(html_table))
+
+    confusion_mat = confusion_mat.astype(int)
+
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(confusion_mat, annot=True, fmt='d', cmap='Reds',
+                    annot_kws={"size": 25},
+                    xticklabels=["DLM : class " + str(i) for i in range(1, confusion_mat.shape[1]+1)], 
+                    yticklabels=["Human reader : class " + str(i) for i in range(1, confusion_mat.shape[0]+1)])
+
+    plt.yticks(rotation=0, fontsize=20)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_ticklabels(ax.xaxis.get_ticklabels(), fontsize=20)
+
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=15)
+
+    plt.savefig("confusion_matrix.png", dpi=300)    
+    
+    
+############################################### CONFUSION MATRIX FOR VESSEL STENOSIS ANALYSIS WITH NO N
+def noN_stenves_confusion_matrix(df):
+    
+    confusion_mat = np.zeros((2,2))
+
+    for i in range(len(y_true_columns)):
+        y_true = df.loc[df[y_true_columns[i]]!="N", y_true_columns[i]].replace({1:1, 2:1, 3:2}).astype(str)
+        y_pred = df.loc[df[y_true_columns[i]]!="N", y_pred_columns[i]].replace({1:1, 2:1, 3:2}).astype(str)
+        confusion_mat += confusion_matrix(y_true, y_pred)
+
+    confusion_mat_df = pd.DataFrame(confusion_mat,
+                                columns=["Model: " + str(i+1) for i in range(confusion_mat.shape[1])],
+                                index=["Human grading: " + str(i+1) for i in range(confusion_mat.shape[0])])
+
+    confusion_mat_df.loc["Total"] = confusion_mat_df.sum()
+    confusion_mat_df["Total"] = confusion_mat_df.sum(axis=1)
+
+    html_table = confusion_mat_df.to_html()
+    display(HTML(html_table))
+
+    TP = confusion_mat[1][1]
+    FP = confusion_mat[0][1]
+    FN = confusion_mat[1][0]
+    TN = confusion_mat[0][0]
+    sensitivity = TP / (TP + FN)
+    specificity = TN / (TN + FP)
+    accuracy = (TP + TN) / (TP + TN + FP + FN)
+    PPV = TP / (TP + FP)
+    NPV = TN / (TN + FN)
+
+    print("Sensitivity:", sensitivity)
+    print("Specificity:", specificity)
+    print("Accuracy:", accuracy)
+    print("Positive Predictive Value (PPV):", PPV)
+    print("Negative Predictive Value (NPV):", NPV)
+
+    confusion_mat = confusion_mat.astype(int)
+
+    plt.figure(figsize=(10, 8))
+    ax = sns.heatmap(confusion_mat, annot=True, fmt='d', cmap='Reds',
+                    annot_kws={"size": 25},
+                    xticklabels=["DLM : stenosis < 50%", "DLM : stenosis ≥ 50%"],
+                    yticklabels=["Human reader: stenosis < 50%", "Human reader: stenosis ≥ 50%"])
+
+    plt.yticks(rotation=0, fontsize=20)
+    ax.xaxis.tick_top() # x axis on top
+    ax.xaxis.set_ticklabels(ax.xaxis.get_ticklabels(), fontsize=20)
+
+    cbar = ax.collections[0].colorbar
+    cbar.ax.tick_params(labelsize=15)
+
+    plt.savefig("confusion_matrix.png", dpi=300)
+    
+    # Return confusion matrix
+    return confusion_mat
+
+def plot_diagnostic_scores(sensitivity, specificity, PPV, NPV, accuracy):
+    # Create a histogram with 5 bins
+    plt.hist([sensitivity, specificity, PPV, NPV, accuracy], bins=5, color='#80c1ff')
+    
+    # Add the diagnostic scores to the bars
+    plt.text(sensitivity, 5, f"Sensitivity: {sensitivity:.2f}")
+    plt.text(specificity, 4, f"Specificity: {specificity:.2f}")
+    plt.text(PPV, 3, f"PPV: {PPV:.2f}")
+    plt.text(NPV, 2, f"NPV: {NPV:.2f}")
+    plt.text(accuracy, 1, f"Accuracy: {accuracy:.2f}")
+    
+    # Set the x-axis label
+    plt.xlabel("Diagnostic Scores")
+    
+    # Show the plot
+    plt.show()
+
+############ PER PATIENT - AIQ PATIENTS
+
+# Calculate the confusion matrix
+pat_confusion_matrix(df_0)
+
+############ PER PATIENT - AIQ PATIENTS STENOSIS
+
+# Calculate the confusion matrix
+sten_confusion_matrix(df_sten_0)
+
+# Call the sten_confusion_matrix function and get the diagnostic scores
+sensitivity, specificity, PPV, NPV, accuracy = sten_confusion_matrix(df_sten_0)
+
+# Plot the diagnostic scores
+plot_diagnostic_scores(sensitivity, specificity, PPV, NPV, accuracy)
+
+############ PER VESSEL - AIQ PATIENTS
+
+# Calculate the confusion matrix
+ves_confusion_matrix(df_0)
+
+############ PER VESSEL - AIQ PATIENTS STENOSIS
+
+# Calculate the confusion matrix
+stenves_confusion_matrix(df_0)
+
+# Call the sten_confusion_matrix function and get the diagnostic scores
+sensitivity, specificity, PPV, NPV, accuracy = stenves_confusion_matrix(df_0)
+
+# Plot the diagnostic scores
+plot_diagnostic_scores(sensitivity, specificity, PPV, NPV, accuracy)
+
+############ PER PATIENT - IIQ PATIENTS
+
+# Calculate the confusion matrix
+pat_confusion_matrix(df_1)
+
+############ PER VESSEL - IIQ PATIENTS
+
+# Calculate the confusion matrix
+noN_ves_confusion_matrix(df_1)
+
+############ PER VESSEL - INFARCT PATIENTS
+
+# Calculate the confusion matrix
+noN_ves_confusion_matrix(df_inf)
+
+############ PER VESSEL - IIQ PATIENTS STENOSIS
+
+noN_stenves_confusion_matrix(df_1)
+
+############ PER VESSEL - INFARCT PATIENTS
+
+noN_ves_confusion_matrix(df_inf)
+
+############ PER VESSEL - INFARCT PATIENTS STENOSIS
+
+noN_stenves_confusion_matrix(df_sten_inf)
+
+############ PER VESSEL - INFARCT PATIENTS STENOSIS - HQ
+
+noN_stenves_confusion_matrix(df_sten_inf_HQ)
+
+############ PER VESSEL - INFARCT PATIENTS STENOSIS - LQ
+
+noN_stenves_confusion_matrix(df_sten_inf_LQ)
+
+# Calculate the plot for HQ patients
+
+def plot_scores(sens, spec, NPV, PPV, acc):
+    # Define data and labels
+    data = [sens, spec, PPV, NPV, acc]
+    labels = ['Sensitivity', 'Specificity', 'PPV', 'NPV', 'Accuracy']
+    
+    # Set figure size and style
+    plt.figure(figsize=(8,6))
+    plt.style.use('ggplot')
+    
+    # Plot histogram
+    plt.bar(labels, data, color='blue')
+    
+    # Set limits and ticks
+    plt.ylim([0, 1.1])
+    plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0], ['0%', '20%', '40%', '60%', '80%', '100%'])
+    plt.xticks(color='black', fontsize=15)
+    plt.yticks(color='black', fontsize=14)
+    
+    # Write scores on top of the bars
+    for i in range(len(data)):
+        plt.text(i, data[i] + 0.05, str(round(data[i]*100)) + '%', ha='center', fontsize=14)
+    
+    # Set title and axis labels
+    plt.title('Diagnostic Performance in HQ patients',fontsize=21)
+    plt.xlabel('')
+    plt.ylabel('')
+    
+    # Remove grid and set background color to white
+    plt.grid(False)
+    plt.gca().set_facecolor('white')
+    
+    # Save plot as high-definition JPG
+    plt.savefig('diagnostic_scores_hq.jpg', dpi=400, bbox_inches='tight')
+    
+    # Show plot
+    plt.show()
+
+sens = 0.98
+spec = 0.79
+PPV = 0.57
+NPV = 0.99
+acc = 0.84
+
+plot_scores(sens, spec, PPV, NPV, acc)
+
+# Calculate the plot for LQ patients
+
+def plot_scores(sens, spec, NPV, PPV, acc):
+    # Define data and labels
+    data = [sens, spec, PPV, NPV, acc]
+    labels = ['Sensitivity', 'Specificity', 'PPV', 'NPV', 'Accuracy']
+    
+    # Set figure size and style
+    plt.figure(figsize=(8,6))
+    plt.style.use('ggplot')
+    
+    # Plot histogram
+    plt.bar(labels, data, color='#d3d3d3')
+    
+    # Set limits and ticks
+    plt.ylim([0, 1.1])
+    plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0], ['0%', '20%', '40%', '60%', '80%', '100%'])
+    plt.xticks(color='black', fontsize=15)
+    plt.yticks(color='black', fontsize=14)
+    
+    # Write scores on top of the bars
+    for i in range(len(data)):
+        plt.text(i, data[i] + 0.05, str(round(data[i]*100)) + '%', ha='center', fontsize=14)
+    
+    # Set title and axis labels
+    plt.title('Diagnostic Performance in LQ patients',fontsize=21)
+    plt.xlabel('')
+    plt.ylabel('')
+    
+    # Remove grid and set background color to white
+    plt.grid(False)
+    plt.gca().set_facecolor('white')
+    
+    # Save plot as high-definition JPG
+    plt.savefig('diagnostic_scores_lq.jpg', dpi=400, bbox_inches='tight')
+    
+    # Show plot
+    plt.show()
+
+sens = 0.79
+spec = 0.86
+PPV = 0.71
+NPV = 0.90
+acc = 0.84
+
+plot_scores(sens, spec, PPV, NPV, acc)
+
+# Calculate the plot for INFARCT vessels
+
+def plot_scores(sens, spec, NPV, PPV, acc):
+    # Define data and labels
+    data = [sens, spec, PPV, NPV, acc]
+    labels = ['Sensitivity', 'Specificity', 'PPV', 'NPV', 'Accuracy']
+    
+    # Set figure size and style
+    plt.figure(figsize=(8,6))
+    plt.style.use('ggplot')
+    
+    # Plot histogram
+    plt.bar(labels, data, color='#008080')
+    
+    # Set limits and ticks
+    plt.ylim([0, 1.1])
+    plt.yticks([0, 0.2, 0.4, 0.6, 0.8, 1.0], ['0%', '20%', '40%', '60%', '80%', '100%'])
+    plt.xticks(color='black', fontsize=15)
+    plt.yticks(color='black', fontsize=14)
+    
+    # Write scores on top of the bars
+    for i in range(len(data)):
+        plt.text(i, data[i] + 0.05, str(round(data[i]*100)) + '%', ha='center', fontsize=14)
+    
+    # Set title and axis labels
+    plt.title('Diagnostic Performance in patients with ACS',fontsize=21)
+    plt.xlabel('')
+    plt.ylabel('')
+    
+    # Remove grid and set background color to white
+    plt.grid(False)
+    plt.gca().set_facecolor('white')
+    
+    # Save plot as high-definition JPG
+    plt.savefig('diagnostic_scores_inf.jpg', dpi=400, bbox_inches='tight')
+    
+    # Show plot
+    plt.show()
+    
+sens = 0.93
+spec = 0.85
+PPV = 0.87
+PV = 0.92
+acc = 0.89
+
+plot_scores(sens, spec, PPV, NPV, acc)
